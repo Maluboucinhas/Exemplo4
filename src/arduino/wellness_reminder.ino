@@ -64,132 +64,6 @@ static float currentTemp       = 0.0F;
 static int   currentLum        = 0;
 static int   currentLumPercent = 0;
 
-// ===== FUNCOES AUXILIARES =====
-
-static void beep(unsigned int ms, int times) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(BUZZER, HIGH);
-    delay(ms);
-    digitalWrite(BUZZER, LOW);
-    delay(100);
-  }
-}
-
-static void clearLeds() {
-  digitalWrite(LED_GREEN, LOW);
-  digitalWrite(LED_RED, LOW);
-}
-
-static bool buttonPressed() {
-  return (digitalRead(JOY_SW) == LOW);
-}
-
-// espera um clique (pressionar e soltar)
-static void waitButtonClick() {
-  // solta se estiver pressionado
-  while (digitalRead(JOY_SW) == LOW) {
-    delay(20);
-  }
-  // espera apertar
-  while (digitalRead(JOY_SW) == HIGH) {
-    delay(20);
-  }
-  // espera soltar
-  while (digitalRead(JOY_SW) == LOW) {
-    delay(20);
-  }
-}
-
-// ===== EEPROM =====
-static void saveData() {
-  EEPROM.put(MEM_ADDRESS, memoryData);
-}
-
-static void loadData() {
-  EEPROM.get(MEM_ADDRESS, memoryData);
-  if (memoryData.signature != MEM_SIGNATURE) {
-    memoryData.signature = MEM_SIGNATURE;
-    memoryData.pauses    = 0;
-    saveData();
-  }
-}
-
-// ===== LCD =====
-static void showWelcome() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Wellness Reminder");
-  lcd.setCursor(0, 1);
-  lcd.print("Press button to go");
-}
-
-static void showStatus() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-
-  DateTime now = rtc.now();
-
-  // mostra hora
-  if (now.hour() < 10) lcd.print('0');
-  lcd.print(now.hour());
-  lcd.print(':');
-  if (now.minute() < 10) lcd.print('0');
-  lcd.print(now.minute());
-  lcd.print(' ');
-
-  // mostra temperatura
-  lcd.print((int)currentTemp);
-  lcd.print((char)223); // simbolo de grau
-  lcd.print('C');
-
-  // segunda linha: luminosidade + status
-  lcd.setCursor(0, 1);
-  lcd.print("L:");
-  lcd.print(currentLumPercent);
-  lcd.print("% ");
-
-  bool tempOk = (currentTemp >= TEMP_MIN && currentTemp <= TEMP_MAX);
-  bool lumOk  = (currentLumPercent >= LUM_MIN && currentLumPercent <= LUM_MAX);
-
-  if (tempOk && lumOk) {
-    lcd.print("OK");
-  } else {
-    lcd.print("NOK");
-  }
-}
-
-static void showBreak() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Break time");
-  lcd.setCursor(0, 1);
-  lcd.print("Press btn to resume");
-}
-
-// ===== SENSORES =====
-static void readSensors() {
-  float t = dht.readTemperature();
-  if (!isnan(t)) {
-    currentTemp = t;
-  }
-  currentLum = analogRead(LDR_PIN);
-  currentLumPercent = map(currentLum, 0, 1023, 0, 100);
-}
-
-static void updateLeds() {
-  bool tempOk = (currentTemp >= TEMP_MIN && currentTemp <= TEMP_MAX);
-  bool lumOk  = (currentLumPercent >= LUM_MIN && currentLumPercent <= LUM_MAX);
-
-  if (tempOk && lumOk) {
-    digitalWrite(LED_GREEN, HIGH);
-    digitalWrite(LED_RED, LOW);
-  } else {
-    digitalWrite(LED_GREEN, LOW);
-    digitalWrite(LED_RED, HIGH);
-  }
-}
-
-// ===== SETUP =====
 void setup() {
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_RED,   OUTPUT);
@@ -197,7 +71,8 @@ void setup() {
   pinMode(JOY_SW,    INPUT_PULLUP);
   pinMode(LDR_PIN,   INPUT);
 
-  clearLeds();
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(LED_RED, LOW);
   digitalWrite(BUZZER, LOW);
 
   lcd.begin(16, 2);
@@ -208,26 +83,58 @@ void setup() {
 
   Serial.begin(9600);
 
-  loadData();
-  showWelcome();
-  beep(150, 2);
+  EEPROM.get(MEM_ADDRESS, memoryData);
+  if (memoryData.signature != MEM_SIGNATURE) {
+    memoryData.signature = MEM_SIGNATURE;
+    memoryData.pauses    = 0;
+    EEPROM.put(MEM_ADDRESS, memoryData);
+  }
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Wellness Reminder");
+  lcd.setCursor(0, 1);
+  lcd.print("Press btn p iniciar");
+
+  for (int i = 0; i < 2; ++i) {
+    digitalWrite(BUZZER, HIGH);
+    delay(150);
+    digitalWrite(BUZZER, LOW);
+    delay(100);
+  }
 }
 
-// ===== LOOP =====
 void loop() {
+  bool buttonDown = (digitalRead(JOY_SW) == LOW);
+
   if (!sessionActive) {
-    if (buttonPressed()) {
-      waitButtonClick();
+    if (buttonDown) {
+      while (digitalRead(JOY_SW) == LOW) {
+        delay(20);
+      }
+      while (digitalRead(JOY_SW) == HIGH) {
+        delay(20);
+      }
+      while (digitalRead(JOY_SW) == LOW) {
+        delay(20);
+      }
+
       sessionActive = true;
       sessionStart  = millis();
       lastBreak     = sessionStart;
-      beep(100, 3);
+
+      for (int i = 0; i < 3; ++i) {
+        digitalWrite(BUZZER, HIGH);
+        delay(100);
+        digitalWrite(BUZZER, LOW);
+        delay(100);
+      }
 
       lcd.clear();
       lcd.setCursor(0, 0);
-      lcd.print("Session started");
+      lcd.print("Sessao iniciada");
       lcd.setCursor(0, 1);
-      lcd.print("Good studies!");
+      lcd.print("Bons estudos");
       delay(1000);
     }
     return;
@@ -237,34 +144,116 @@ void loop() {
 
   if (now - lastSensorRead >= SENSOR_READ_MS) {
     lastSensorRead = now;
-    readSensors();
-    updateLeds();
-    showStatus();
+
+    float t = dht.readTemperature();
+    if (!isnan(t)) {
+      currentTemp = t;
+    }
+    currentLum = analogRead(LDR_PIN);
+    currentLumPercent = map(currentLum, 0, 1023, 0, 100);
+
+    bool tempOk = (currentTemp >= TEMP_MIN && currentTemp <= TEMP_MAX);
+    bool lumOk  = (currentLumPercent >= LUM_MIN && currentLumPercent <= LUM_MAX);
+
+    if (tempOk && lumOk) {
+      digitalWrite(LED_GREEN, HIGH);
+      digitalWrite(LED_RED, LOW);
+    } else {
+      digitalWrite(LED_GREEN, LOW);
+      digitalWrite(LED_RED, HIGH);
+    }
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+
+    DateTime rtcNow = rtc.now();
+    if (rtcNow.hour() < 10) lcd.print('0');
+    lcd.print(rtcNow.hour());
+    lcd.print(':');
+    if (rtcNow.minute() < 10) lcd.print('0');
+    lcd.print(rtcNow.minute());
+    lcd.print(' ');
+
+    lcd.print((int)currentTemp);
+    lcd.print((char)223);
+    lcd.print('C');
+
+    lcd.setCursor(0, 1);
+    lcd.print("L:");
+    lcd.print(currentLumPercent);
+    lcd.print("% ");
+    lcd.print((tempOk && lumOk) ? "OK" : "NOK");
   }
 
   if (now - lastBreak >= INTERVAL_BREAK) {
-    clearLeds();
+    digitalWrite(LED_GREEN, LOW);
     digitalWrite(LED_RED, HIGH);
-    beep(200, 3);
-    showBreak();
 
-    waitButtonClick();
+    for (int i = 0; i < 3; ++i) {
+      digitalWrite(BUZZER, HIGH);
+      delay(200);
+      digitalWrite(BUZZER, LOW);
+      delay(100);
+    }
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Hora da pausa");
+    lcd.setCursor(0, 1);
+    lcd.print("Press btn ao voltar");
+
+    while (digitalRead(JOY_SW) == LOW) {
+      delay(20);
+    }
+    while (digitalRead(JOY_SW) == HIGH) {
+      delay(20);
+    }
+    while (digitalRead(JOY_SW) == LOW) {
+      delay(20);
+    }
 
     digitalWrite(LED_RED, LOW);
     digitalWrite(LED_GREEN, HIGH);
 
     memoryData.pauses++;
-    saveData();
+    EEPROM.put(MEM_ADDRESS, memoryData);
 
     lastBreak = millis();
-    beep(100, 2);
+
+    for (int i = 0; i < 2; ++i) {
+      digitalWrite(BUZZER, HIGH);
+      delay(100);
+      digitalWrite(BUZZER, LOW);
+      delay(100);
+    }
   }
 
-  if (buttonPressed()) {
-    waitButtonClick();
+  if (buttonDown) {
+    while (digitalRead(JOY_SW) == LOW) {
+      delay(20);
+    }
+    while (digitalRead(JOY_SW) == HIGH) {
+      delay(20);
+    }
+    while (digitalRead(JOY_SW) == LOW) {
+      delay(20);
+    }
+
     sessionActive = false;
-    clearLeds();
-    showWelcome();
-    beep(150, 2);
+    digitalWrite(LED_GREEN, LOW);
+    digitalWrite(LED_RED, LOW);
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Wellness Reminder");
+    lcd.setCursor(0, 1);
+    lcd.print("Press btn p iniciar");
+
+    for (int i = 0; i < 2; ++i) {
+      digitalWrite(BUZZER, HIGH);
+      delay(150);
+      digitalWrite(BUZZER, LOW);
+      delay(100);
+    }
   }
 }
